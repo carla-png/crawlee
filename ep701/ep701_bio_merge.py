@@ -44,16 +44,17 @@ YEAR = r"(?:19[3-9]\d|20[0-2]\d)"
 
 PERSONAL_WORDS = [
     "wife", "husband", "spouse", "partner in life", "married", "marriage", "children", "child",
-    "kids", "kid", "son ", "sons", "daughter", "daughters", "grandchild", "grandchildren",
-    "grandkids", "grandson", "granddaughter", "mother", "father", "mom ", "dad ", "parents",
+    "kids", "kid", "son", "sons", "daughter", "daughters", "grandchild", "grandchildren",
+    "grandkids", "grandson", "granddaughter", "mother", "father", "mom", "dad", "parents",
     "brother", "sister", "family", "grew up", "raised in", "born in", "born and raised",
-    "native of", "hometown", "home town", "dog", "dogs", "cat ", "cats", "puppy", "pets",
-    "pet ", "horse", "cancer", "survivor", "illness", "diagnosed", "disease", "surgery",
-    "recovered", "passed away", "hobbies", "hobby", "enjoys", "loves to", "avid", "golf",
+    "native of", "hometown", "home town", "dog", "dogs", "cat", "cats", "puppy", "pets",
+    "pet", "horse", "cancer", "survivor", "illness", "diagnosed", "disease", "surgery",
+    "passed away", "hobbies", "hobby", "enjoys", "loves to", "avid", "golf",
     "fishing", "hiking", "skiing", "cycling", "gardening", "cooking", "traveling", "travelling",
     "church", "parish", "faith", "vacation", "his free time", "her free time", "spare time",
     "when not", "when he is not", "when she is not", "outside the office", "outside of work",
 ]
+PERSONAL_RE = re.compile(r"\b(?:" + "|".join(re.escape(w).replace(r"\ ", r"\s+") for w in PERSONAL_WORDS) + r")\b", re.I)
 
 # ---------------------------------------------------------------------------
 # Fact patterns. Each entry: (fact_type, compiled regex, priority). Lower priority wins.
@@ -126,20 +127,23 @@ FACT_PATTERNS = [
 ]
 
 ICP_TERMS = {
-    "injury": ["personal injury", "car accident", "auto accident", "truck accident", "motorcycle accident",
-               "slip and fall", "wrongful death", "catastrophic injur", "injury lawyer", "injury attorney",
-               "injured", "accident lawyer", "accident attorney", "medical malpractice", "dog bite",
-               "workers' comp", "workers comp", "workers' compensation", "premises liability"],
-    "mass_tort": ["mass tort", "class action", "product liability", "talcum", "roundup", "camp lejeune",
-                  "mesothelioma", "asbestos", "hernia mesh", "zantac", "paraquat", "3m earplug",
-                  "multidistrict", "mdl", "defective drug", "dangerous drug"],
-    "criminal": ["criminal defense", "criminal defence", "dui", "dwi", "owi", "drug charges", "felony",
-                 "misdemeanor", "expungement", "domestic violence", "sex crimes", "assault charges",
-                 "theft charges", "criminal law", "arrested", "bail", "traffic tickets"],
+    "injury": ["personal injury", "car accidents?", "auto accidents?", "truck accidents?", "motorcycle accidents?",
+               "slip and fall", "wrongful death", "catastrophic injur(?:y|ies)", "injury lawyers?", "injury attorneys?",
+               "injured", "accident lawyers?", "accident attorneys?", "medical malpractice", "dog bites?",
+               "workers'? comp(?:ensation)?", "premises liability"],
+    "mass_tort": ["mass torts?", "class actions?", "product liability", "talcum", "roundup", "camp lejeune",
+                  "mesothelioma", "asbestos", "hernia mesh", "zantac", "paraquat", "3m earplugs?",
+                  "multidistrict", "mdl", "defective drugs?", "dangerous drugs?"],
+    "criminal": ["criminal defen[cs]e", "dui", "dwi", "owi", "drug charges", "felony", "felonies",
+                 "misdemeanors?", "expungement", "domestic violence", "sex crimes", "assault charges",
+                 "theft charges", "criminal law", "arrested", "bail bonds?", "traffic tickets"],
 }
-ESTATE_TERMS = ["estate plan", "estate planning", "trust", "will", "wills", "probate", "elder law",
-                "medicaid planning", "asset protection", "power of attorney", "guardianship",
-                "conservatorship", "special needs", "estate administration", "succession", "legacy"]
+ESTATE_TERMS = ["estate plans?", "estate planning", "trusts", "living trusts?", "revocable trusts?", "irrevocable trusts?",
+                "trust administration", "wills", "last will", "probate", "elder law", "medicaid planning",
+                "asset protection", "powers? of attorney", "guardianships?", "conservatorships?", "special needs",
+                "estate administration", "succession planning", "legacy planning"]
+ICP_RE = {k: re.compile(r"\b(?:" + "|".join(v) + r")\b", re.I) for k, v in ICP_TERMS.items()}
+ESTATE_RE = re.compile(r"\b(?:" + "|".join(ESTATE_TERMS) + r")\b", re.I)
 
 
 # ---------------------------------------------------------------------------
@@ -166,11 +170,8 @@ def has_dash(s: str) -> bool:
 
 
 def personal_hit(s: str) -> str | None:
-    low = " " + re.sub(r"\s+", " ", str(s).lower()) + " "
-    for w in PERSONAL_WORDS:
-        if w in low:
-            return w.strip()
-    return None
+    m = PERSONAL_RE.search(str(s))
+    return m.group(0).lower() if m else None
 
 
 def clean_value(v: str) -> str:
@@ -380,9 +381,8 @@ def ensure_col(df: pd.DataFrame, name: str) -> str:
 
 
 def icp_flag(row_text: str) -> str:
-    low = row_text.lower()
-    scores = {k: sum(low.count(t) for t in terms) for k, terms in ICP_TERMS.items()}
-    estate = sum(low.count(t) for t in ESTATE_TERMS)
+    scores = {k: len(rx.findall(row_text)) for k, rx in ICP_RE.items()}
+    estate = len(ESTATE_RE.findall(row_text))
     best = max(scores, key=scores.get)
     if scores[best] == 0:
         return ""
